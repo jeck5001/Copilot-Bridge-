@@ -541,6 +541,20 @@ func (c *Client) runChat(ctx context.Context, acc Account, req Request, firstTur
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				// Keep both layers alive. ChatHub expects its SignalR application
+				// heartbeat, while some HTTP/SOCKS intermediaries only refresh their
+				// idle timer when they see a standard WebSocket control frame.
+				writeMu.Lock()
+				controlErr := conn.WriteControl(websocket.PingMessage, []byte("m365-keepalive"), time.Now().Add(2*time.Second))
+				writeMu.Unlock()
+				if controlErr != nil {
+					select {
+					case pingErr <- controlErr:
+					default:
+					}
+					_ = conn.Close()
+					return
+				}
 				if err := write([]byte(`{"type":6}` + rs)); err != nil {
 					select {
 					case pingErr <- err:
@@ -614,7 +628,12 @@ func (c *Client) runChat(ctx context.Context, acc Account, req Request, firstTur
 		}
 	}
 
+	// The HTTP layer owns the request budget (currently configurable up to an
+	// hour). Do not silently cap a configured long task at ten minutes here.
 	deadline := time.Now().Add(10 * time.Minute)
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		deadline = ctxDeadline
+	}
 	var finalFrameDeadline time.Time
 	for time.Now().Before(deadline) {
 		select {
