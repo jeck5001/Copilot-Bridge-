@@ -1,0 +1,47 @@
+name: m365-gateway
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: m365-gateway:local
+    restart: unless-stopped
+    ports:
+      - "${M365_BIND_ADDRESS:-127.0.0.1}:${M365_PORT:-4141}:4141"
+    environment:
+      M365_LISTEN: 0.0.0.0:4141
+      M365_TOKEN_CACHE: /data/accounts.json
+      M365_SESSION_CACHE: /data/sessions.json
+      M365_API_KEYS: /data/api-keys.json
+      M365_SETTINGS_FILE: /data/settings.json
+      M365_DEBUG_LOG: /data/debug-logs.jsonl
+      M365_ADMIN_PASSWORD_HASH_FILE: /data/admin-password.hash
+      M365_ADMIN_PASSWORD: "${M365_ADMIN_PASSWORD:-admin888}"
+      M365_COOKIE_SECURE: "${M365_COOKIE_SECURE:-false}"
+      M365_LOG_LEVEL: "${M365_LOG_LEVEL:-warn}"
+      M365_CHAT_TIMEOUT_SECONDS: "${M365_CHAT_TIMEOUT_SECONDS:-600}"
+      M365_IMAGE_TIMEOUT_SECONDS: "${M365_IMAGE_TIMEOUT_SECONDS:-150}"
+      M365_MAX_REQUEST_BODY_BYTES: "${M365_MAX_REQUEST_BODY_BYTES:-8388608}"
+      M365_MAX_TOOL_ROUNDS: "${M365_MAX_TOOL_ROUNDS:-64}"
+      M365_MAX_TOOL_CALLS_PER_TURN: "${M365_MAX_TOOL_CALLS_PER_TURN:-4}"
+    volumes:
+      - m365-gateway-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  m365-gateway-data:

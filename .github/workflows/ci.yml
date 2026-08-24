@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify formatting
+        shell: bash
+        run: |
+          files=$(gofmt -l cmd internal)
+          if [ -n "$files" ]; then
+            printf 'The following files need gofmt:\n%s\n' "$files"
+            exit 1
+          fi
+      - name: Unit and integration tests
+        run: go test ./...
+      - name: Race tests
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build -trimpath -o /tmp/m365-gateway ./cmd/server
+      - name: Check management UI wiring
+        run: node scripts/check-ui.js
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+      - name: Build container image
+        run: docker build --pull --tag m365-gateway:ci .
+      - name: Public-tree safety checks
+        shell: bash
+        run: |
+          test -f README.md
+          test -f DISCLAIMER.md
+          test -f SECURITY.md
+          test -f THIRD_PARTY_NOTICES.md
+          test -f web/index.html
+          test -f web/admin.js
+          if find . -type f \( -name 'accounts.json' -o -name 'sessions.json' -o -name 'api-keys.json' -o -name '*.pem' -o -name '*.pfx' -o -name '*.key' \) -not -path './.git/*' | grep -q .; then
+            echo 'Runtime data or private key material is present in the repository.'
+            exit 1
+          fi

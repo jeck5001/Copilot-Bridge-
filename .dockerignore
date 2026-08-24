@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+data
+bin
+dist
+coverage
+*.zip
+*.bundle
+*.log
+*.md
+!LICENSE

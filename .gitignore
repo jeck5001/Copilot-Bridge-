@@ -1,0 +1,33 @@
+.env
+.env.*
+!.env.example
+
+# Runtime state and credentials
+data/*
+!data/.gitkeep
+*.token
+*.key
+*.pem
+*.p12
+*.pfx
+accounts.json
+token-cache.json
+sessions.json
+api-keys.json
+settings.json
+stats.json
+account-route.json
+admin-password.hash
+debug-logs.jsonl
+
+# Builds and local tooling
+bin/
+dist/
+coverage/
+*.exe
+*.test
+*.out
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
