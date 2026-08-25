@@ -248,16 +248,35 @@ func TestResponsesAcceptsTextVerbosity(t *testing.T) {
 	}
 }
 
-func TestResponsesStripsAdditionalToolsInputItems(t *testing.T) {
+func TestResponsesMergesAdditionalToolsIntoUpstreamSchema(t *testing.T) {
 	r := responsesRequest{Input: []any{
-		map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{"type": "namespace", "name": "functions"}}},
+		map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{
+			"type": "namespace", "name": "functions", "description": "", "tools": []any{
+				map[string]any{"type": "custom", "name": "exec", "description": "run js"},
+				map[string]any{"type": "custom", "name": "apply_patch", "description": "edit files"},
+			},
+		}}},
 		map[string]any{"type": "message", "role": "user", "content": "分析下当前项目"},
 	}}
 	o, err := r.openAI()
 	if err != nil {
-		t.Fatalf("additional_tools item must be stripped, not rejected: %v", err)
+		t.Fatalf("additional_tools item must merge, not reject: %v", err)
 	}
 	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
 		t.Fatalf("additional_tools leaked into conversation history: %#v", o.Messages)
+	}
+	names := map[string]bool{}
+	for _, tool := range o.Tools {
+		var f struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(tool.Function, &f) == nil && f.Name != "" {
+			names[f.Name] = true
+		}
+	}
+	for _, want := range []string{"functions.exec", "functions.apply_patch"} {
+		if !names[want] {
+			t.Fatalf("additional_tools tool %q missing from upstream schema: %v", want, names)
+		}
 	}
 }
