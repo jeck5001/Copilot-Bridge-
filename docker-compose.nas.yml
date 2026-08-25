@@ -29,7 +29,10 @@ services:
       M365_MAX_TOOL_ROUNDS: "${M365_MAX_TOOL_ROUNDS:-64}"
       M365_MAX_TOOL_CALLS_PER_TURN: "${M365_MAX_TOOL_CALLS_PER_TURN:-4}"
     volumes:
-      - m365-gateway-data:/data
+      # 数据存到当前文件夹(compose 文件所在目录)下的 data/ 目录。
+      # 注意：容器内以 m365 用户运行，若容器无法写入 data/，
+      # 在宿主机执行 sudo chmod -R 777 data （或改为 100:100）。
+      - ./data:/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -45,6 +48,3 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-
-volumes:
-  m365-gateway-data:
