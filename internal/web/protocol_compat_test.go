@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -234,5 +235,29 @@ func TestResponsesPromptCacheKeyDoesNotCreateConversationIdentity(t *testing.T) 
 	}
 	if o1.SessionKey != "" || o2.SessionKey != "" {
 		t.Fatalf("prompt_cache_key incorrectly became conversation identity: %q/%q", o1.SessionKey, o2.SessionKey)
+	}
+}
+
+func TestResponsesAcceptsTextVerbosity(t *testing.T) {
+	r := responsesRequest{Input: "hi", Text: map[string]any{"verbosity": "low"}}
+	if err := r.validateSemantics(map[string]json.RawMessage{"text": nil}); err != nil {
+		t.Fatalf("text.verbosity must be accepted and ignored: %v", err)
+	}
+	if _, err := r.openAI(); err != nil {
+		t.Fatalf("text.verbosity request failed conversion: %v", err)
+	}
+}
+
+func TestResponsesStripsAdditionalToolsInputItems(t *testing.T) {
+	r := responsesRequest{Input: []any{
+		map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{"type": "namespace", "name": "functions"}}},
+		map[string]any{"type": "message", "role": "user", "content": "分析下当前项目"},
+	}}
+	o, err := r.openAI()
+	if err != nil {
+		t.Fatalf("additional_tools item must be stripped, not rejected: %v", err)
+	}
+	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
+		t.Fatalf("additional_tools leaked into conversation history: %#v", o.Messages)
 	}
 }

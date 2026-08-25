@@ -217,6 +217,11 @@ func (r responsesRequest) openAI() (oaiReq, error) {
 				} else {
 					o.Messages = append(o.Messages, oaiMsg{Role: "assistant", ToolCalls: []map[string]any{call}})
 				}
+			case "additional_tools":
+				// Hermes/Codex 以 input 片段声明的客户端附加工具（如
+				// functions.exec namespace），由客户端本地执行，不进入
+				// 对话历史，网关剥离跳过。
+				continue
 			case "", "message":
 				role, _ := m["role"].(string)
 				if role == "" {
