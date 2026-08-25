@@ -36,7 +36,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # 仓库名 Copilot-Bridge- 结尾带 -，直接用作镜像名是非法的，
+          # 故去掉末尾 -，推送到 ghcr.io/<owner>/copilot-bridge。
+          images: ghcr.io/${{ github.repository_owner }}/copilot-bridge
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}

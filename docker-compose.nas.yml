@@ -7,7 +7,7 @@ name: m365-gateway
 
 services:
   gateway:
-    image: ghcr.io/jeck5001/copilot-bridge-:${M365_IMAGE_TAG:-latest}
+    image: ghcr.io/jeck5001/copilot-bridge:${M365_IMAGE_TAG:-latest}
     pull_policy: always
     restart: unless-stopped
     ports:
