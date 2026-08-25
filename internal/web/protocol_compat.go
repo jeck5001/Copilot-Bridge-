@@ -218,24 +218,23 @@ func (r responsesRequest) openAI() (oaiReq, error) {
 					o.Messages = append(o.Messages, oaiMsg{Role: "assistant", ToolCalls: []map[string]any{call}})
 				}
 			case "additional_tools":
-				// Hermes/Codex 以 input 片段声明的客户端附加工具（如
-				// functions.exec namespace）。这些工具由客户端本地执行。
-				// 不能把它们合并进上游工具 schema：会让 ChatHub 把本
-				// 请求当 "execution agent"，工具转而在微软云端沙箱执行
-				// （pwd=/mnt/data），永远读不到客户端的本地项目。
-				// 不进对话历史，也不移交上游，直接跳过。
-				continue
+				// Codex/Hermes 以 input 片段声明的客户端工具（如 functions 命名空间下的 exec、apply_patch 等）。
+				// 将其正确解析并注册到网关工具列表中，以便 Tool Router 编排工具调用并返回给客户端执行。
+				if rawTools, ok := m["tools"].([]any); ok {
+					for _, rawTool := range rawTools {
+						if toolMap, ok := rawTool.(map[string]any); ok {
+							parsedTools, err := parseResponsesTool(toolMap)
+							if err != nil {
+								return o, err
+							}
+							o.Tools = append(o.Tools, parsedTools...)
+						}
+					}
+				}
 			case "", "message":
 				role, _ := m["role"].(string)
 				if role == "" {
 					role = "user"
-				}
-				if isEnvironmentContextMessage(m) {
-					// 客户端注入的本地 cwd（如 /Users/.../sub2api-tools）在上游
-					// 云端永远不可见。透传只会让模型反复自省 "当前工具环境在
-					// /mnt/data / 无法读取项目文件"。剥离后行为与普通 Chat
-					// Completions 请求一致（模型不把自身当作文件系统执行器）。
-					continue
 				}
 				o.Messages = append(o.Messages, oaiMsg{Role: role, Content: m["content"]})
 			default:
@@ -246,30 +245,11 @@ func (r responsesRequest) openAI() (oaiReq, error) {
 		return o, fmt.Errorf("input must be string or array")
 	}
 	for _, t := range r.Tools {
-		if typ, _ := t["type"].(string); typ != "function" {
-			return o, fmt.Errorf("unsupported tool type %q", typ)
+		parsedTools, err := parseResponsesTool(t)
+		if err != nil {
+			return o, err
 		}
-		// Accept both tool shapes: the flat Responses API form
-		// {"type":"function","name":...,"parameters":...} and the nested Chat
-		// Completions form {"type":"function","function":{"name":...}}. A
-		// nested definition previously produced name:null tools, which made
-		// the tool router silently report no callable tools.
-		fn, _ := t["function"].(map[string]any)
-		name := firstNonEmptyString(t["name"], fn["name"])
-		if name == "" {
-			return o, fmt.Errorf("function tool name required")
-		}
-		description := firstNonEmptyString(t["description"], fn["description"])
-		parameters, hasParams := firstMap(t["parameters"], fn["parameters"])
-		f := map[string]any{"name": name}
-		if description != "" {
-			f["description"] = description
-		}
-		if hasParams {
-			f["parameters"] = parameters
-		}
-		b, _ := json.Marshal(f)
-		o.Tools = append(o.Tools, chathub.Tool{Type: "function", Function: b})
+		o.Tools = append(o.Tools, parsedTools...)
 	}
 	return o, nil
 }
@@ -319,6 +299,46 @@ func firstMap(values ...any) (map[string]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// parseResponsesTool 解析 Responses API 各种格式的工具定义（包括 namespace、custom、function 等）
+func parseResponsesTool(t map[string]any) ([]chathub.Tool, error) {
+	typ, _ := t["type"].(string)
+	if typ == "namespace" {
+		if rawSubTools, ok := t["tools"].([]any); ok {
+			var result []chathub.Tool
+			for _, sub := range rawSubTools {
+				if subMap, ok := sub.(map[string]any); ok {
+					subTools, err := parseResponsesTool(subMap)
+					if err != nil {
+						return nil, err
+					}
+					result = append(result, subTools...)
+				}
+			}
+			return result, nil
+		}
+		return nil, nil
+	}
+	if typ != "" && typ != "function" && typ != "custom" {
+		return nil, fmt.Errorf("unsupported tool type %q", typ)
+	}
+	fn, _ := t["function"].(map[string]any)
+	name := firstNonEmptyString(t["name"], fn["name"])
+	if name == "" {
+		return nil, fmt.Errorf("function tool name required")
+	}
+	description := firstNonEmptyString(t["description"], fn["description"])
+	parameters, hasParams := firstMap(t["parameters"], t["input_schema"], fn["parameters"], fn["input_schema"])
+	f := map[string]any{"name": name}
+	if description != "" {
+		f["description"] = description
+	}
+	if hasParams {
+		f["parameters"] = parameters
+	}
+	b, _ := json.Marshal(f)
+	return []chathub.Tool{{Type: "function", Function: b}}, nil
 }
 
 type anthropicMessage struct {

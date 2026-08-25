@@ -248,7 +248,7 @@ func TestResponsesAcceptsTextVerbosity(t *testing.T) {
 	}
 }
 
-func TestResponsesDropsAdditionalToolsWithoutAgentizingUpstream(t *testing.T) {
+func TestResponsesParsesAdditionalTools(t *testing.T) {
 	r := responsesRequest{Input: []any{
 		map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{
 			"type": "namespace", "name": "functions", "description": "", "tools": []any{
@@ -260,17 +260,17 @@ func TestResponsesDropsAdditionalToolsWithoutAgentizingUpstream(t *testing.T) {
 	}}
 	o, err := r.openAI()
 	if err != nil {
-		t.Fatalf("additional_tools item must be skipped, not rejected: %v", err)
+		t.Fatalf("additional_tools item parsing failed: %v", err)
 	}
 	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
-		t.Fatalf("additional_tools leaked into conversation history: %#v", o.Messages)
+		t.Fatalf("messages mismatch: %#v", o.Messages)
 	}
-	if len(o.Tools) != 0 {
-		t.Fatalf("additional_tools must not be advertised upstream (would trigger execution-agent mode): %v", o.Tools)
+	if len(o.Tools) != 2 {
+		t.Fatalf("additional_tools must be parsed into o.Tools: %v", o.Tools)
 	}
 }
 
-func TestResponsesStripsLocalEnvironmentContext(t *testing.T) {
+func TestResponsesPreservesLocalEnvironmentContext(t *testing.T) {
 	env := `<environment_context><cwd>/Users/jfwang/IdeaProjects/CascadeProjects/sub2api-tools</cwd><shell>zsh</shell></environment_context>`
 	r := responsesRequest{Input: []any{
 		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": env}}},
@@ -278,9 +278,9 @@ func TestResponsesStripsLocalEnvironmentContext(t *testing.T) {
 	}}
 	o, err := r.openAI()
 	if err != nil {
-		t.Fatalf("environment_context must be stripped, not rejected: %v", err)
+		t.Fatalf("environment_context parsing failed: %v", err)
 	}
-	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
-		t.Fatalf("environment_context leaked to upstream: %#v", o.Messages)
+	if len(o.Messages) != 2 {
+		t.Fatalf("environment_context must be preserved in messages: %#v", o.Messages)
 	}
 }
