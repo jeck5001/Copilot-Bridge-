@@ -218,17 +218,24 @@ func (r responsesRequest) openAI() (oaiReq, error) {
 					o.Messages = append(o.Messages, oaiMsg{Role: "assistant", ToolCalls: []map[string]any{call}})
 				}
 			case "additional_tools":
-				// Hermes/Codex 以 input 片段声明的附加工具（如 functions.exec
-				// namespace）。这些工具由客户端本地执行，因此不进对话历史，
-				// 但模型必须知道它们的存在才能发起 function_call：
-				// 提取并合并进发给上游的工具 schema。
-				if err := mergeAdditionalTools(&o, m["tools"]); err != nil {
-					return o, err
-				}
+				// Hermes/Codex 以 input 片段声明的客户端附加工具（如
+				// functions.exec namespace）。这些工具由客户端本地执行。
+				// 不能把它们合并进上游工具 schema：会让 ChatHub 把本
+				// 请求当 "execution agent"，工具转而在微软云端沙箱执行
+				// （pwd=/mnt/data），永远读不到客户端的本地项目。
+				// 不进对话历史，也不移交上游，直接跳过。
+				continue
 			case "", "message":
 				role, _ := m["role"].(string)
 				if role == "" {
 					role = "user"
+				}
+				if isEnvironmentContextMessage(m) {
+					// 客户端注入的本地 cwd（如 /Users/.../sub2api-tools）在上游
+					// 云端永远不可见。透传只会让模型反复自省 "当前工具环境在
+					// /mnt/data / 无法读取项目文件"。剥离后行为与普通 Chat
+					// Completions 请求一致（模型不把自身当作文件系统执行器）。
+					continue
 				}
 				o.Messages = append(o.Messages, oaiMsg{Role: role, Content: m["content"]})
 			default:
@@ -267,65 +274,6 @@ func (r responsesRequest) openAI() (oaiReq, error) {
 	return o, nil
 }
 
-// mergeAdditionalTools extracts tool declarations from an additional_tools
-// input item (Hermes/Codex client-side tools such as functions.exec) and
-// merges them into the upstream tool schema. The tools are executed by the
-// client, not the gateway, so they must not enter conversation history, but
-// the model needs their schemas to know they exist and issue function calls.
-func mergeAdditionalTools(o *oaiReq, raw any) error {
-	tools, ok := raw.([]any)
-	if !ok {
-		return fmt.Errorf("additional_tools.tools must be an array")
-	}
-	return mergeToolDeclarations(o, tools, "")
-}
-
-func mergeToolDeclarations(o *oaiReq, decls []any, prefix string) error {
-	for _, raw := range decls {
-		t, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch typ, _ := t["type"].(string); typ {
-		case "namespace":
-			name, _ := t["name"].(string)
-			child, _ := t["tools"].([]any)
-			if err := mergeToolDeclarations(o, child, joinToolName(prefix, name)); err != nil {
-				return err
-			}
-		case "custom", "function", "":
-			name, _ := t["name"].(string)
-			if name == "" {
-				continue
-			}
-			fn := map[string]any{"name": joinToolName(prefix, name)}
-			if desc, _ := t["description"].(string); desc != "" {
-				fn["description"] = desc
-			}
-			if p, _ := t["parameters"].(map[string]any); p != nil {
-				fn["parameters"] = p
-			} else if p, _ := t["input_schema"].(map[string]any); p != nil {
-				fn["parameters"] = p
-			}
-			b, err := json.Marshal(fn)
-			if err != nil {
-				return err
-			}
-			o.Tools = append(o.Tools, chathub.Tool{Type: "function", Function: b})
-		default:
-			// Unknown declaration shape (gateway/list_agents etc.): ignore.
-		}
-	}
-	return nil
-}
-
-func joinToolName(prefix, name string) string {
-	if prefix == "" {
-		return name
-	}
-	return prefix + "." + name
-}
-
 func withRequestInstructions(messages []oaiMsg, instructions string) []oaiMsg {
 	if strings.TrimSpace(instructions) == "" {
 		return messages
@@ -343,6 +291,24 @@ func firstNonEmptyString(values ...any) string {
 		}
 	}
 	return ""
+}
+
+// isEnvironmentContextMessage reports whether an input message is the
+// Codex/Hermes-injected local environment context block.
+func isEnvironmentContextMessage(m map[string]any) bool {
+	switch c := m["content"].(type) {
+	case string:
+		return strings.Contains(c, "<environment_context>")
+	case []any:
+		for _, raw := range c {
+			if b, ok := raw.(map[string]any); ok {
+				if s, _ := b["text"].(string); strings.Contains(s, "<environment_context>") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // firstMap returns the first value that is a non-nil map.

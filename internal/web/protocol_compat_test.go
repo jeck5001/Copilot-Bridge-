@@ -248,7 +248,7 @@ func TestResponsesAcceptsTextVerbosity(t *testing.T) {
 	}
 }
 
-func TestResponsesMergesAdditionalToolsIntoUpstreamSchema(t *testing.T) {
+func TestResponsesDropsAdditionalToolsWithoutAgentizingUpstream(t *testing.T) {
 	r := responsesRequest{Input: []any{
 		map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{
 			"type": "namespace", "name": "functions", "description": "", "tools": []any{
@@ -260,23 +260,27 @@ func TestResponsesMergesAdditionalToolsIntoUpstreamSchema(t *testing.T) {
 	}}
 	o, err := r.openAI()
 	if err != nil {
-		t.Fatalf("additional_tools item must merge, not reject: %v", err)
+		t.Fatalf("additional_tools item must be skipped, not rejected: %v", err)
 	}
 	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
 		t.Fatalf("additional_tools leaked into conversation history: %#v", o.Messages)
 	}
-	names := map[string]bool{}
-	for _, tool := range o.Tools {
-		var f struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(tool.Function, &f) == nil && f.Name != "" {
-			names[f.Name] = true
-		}
+	if len(o.Tools) != 0 {
+		t.Fatalf("additional_tools must not be advertised upstream (would trigger execution-agent mode): %v", o.Tools)
 	}
-	for _, want := range []string{"functions.exec", "functions.apply_patch"} {
-		if !names[want] {
-			t.Fatalf("additional_tools tool %q missing from upstream schema: %v", want, names)
-		}
+}
+
+func TestResponsesStripsLocalEnvironmentContext(t *testing.T) {
+	env := `<environment_context><cwd>/Users/jfwang/IdeaProjects/CascadeProjects/sub2api-tools</cwd><shell>zsh</shell></environment_context>`
+	r := responsesRequest{Input: []any{
+		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": env}}},
+		map[string]any{"type": "message", "role": "user", "content": "分析下当前项目"},
+	}}
+	o, err := r.openAI()
+	if err != nil {
+		t.Fatalf("environment_context must be stripped, not rejected: %v", err)
+	}
+	if len(o.Messages) != 1 || o.Messages[0].Role != "user" {
+		t.Fatalf("environment_context leaked to upstream: %#v", o.Messages)
 	}
 }
