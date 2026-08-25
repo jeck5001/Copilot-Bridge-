@@ -113,9 +113,13 @@ func (r responsesRequest) validateSemantics(fields map[string]json.RawMessage) e
 		if len(r.Text) != 1 {
 			return fmt.Errorf("structured text or verbosity controls are not supported")
 		}
-		format, ok := r.Text["format"].(map[string]any)
-		if !ok || len(format) != 1 || format["type"] != "text" {
-			return fmt.Errorf("structured text output is not supported")
+		// verbosity (OpenAI 的输出冗余度控制) 由 Codex/Hermes 客户端发送，
+		// 网关不透传该字段，仅校验并忽略。
+		if _, ok := r.Text["verbosity"].(string); !ok {
+			format, ok := r.Text["format"].(map[string]any)
+			if !ok || len(format) != 1 || format["type"] != "text" {
+				return fmt.Errorf("structured text output is not supported")
+			}
 		}
 	}
 	if len(r.Metadata) > 16 {
