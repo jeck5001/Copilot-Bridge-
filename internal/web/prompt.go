@@ -61,6 +61,9 @@ func flattenPromptMessages(messages []oaiMsg, attachments []chathub.Attachment) 
 		context = append(context, header+"\n"+history)
 	}
 	if finalPrompt == "" {
+		if lastEvidenceRole == "tool" {
+			context = append(context, "Please provide the complete final response to the user's request based on the tool execution evidence above.")
+		}
 		return strings.TrimSpace(strings.Join(context, "\n\n")), attachments
 	}
 	if len(context) == 0 {

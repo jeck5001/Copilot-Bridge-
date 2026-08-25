@@ -163,6 +163,7 @@ RULES:
 - When the request or persisted task anchors contain an explicit absolute path, URL, shortcut file, or numbered server target, use that exact target. Do not replace it with a relative search in the current workspace and do not ask the user to provide it again before attempting an applicable available tool.
 - On Windows, a .lnk target is not source text. Prefer an available shell/terminal capability that can resolve the shortcut metadata; do not Glob for the shortcut's basename inside the current project.
 - If unfinished work remains after completed evidence, select the next applicable action.
+- For exploration, diagnosis, or project analysis tasks: once project directory structure and primary configuration files (e.g. go.mod, package.json, pom.xml, Cargo.toml, README) have been inspected, you have sufficient evidence; return {"calls":[]} immediately to proceed to the final answer instead of endlessly reading secondary files.
 - Preserve every source-code character and every whitespace sequence inside string arguments.
 - In JSON string values encode literal <, >, and & as \u003c, \u003e, and \u0026. This prevents the chat transport from treating source code as rich HTML; JSON decoding restores the original characters for the tool.
 - Return {"calls":[]} only when no further external action is needed.

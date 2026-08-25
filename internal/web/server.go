@@ -1476,14 +1476,16 @@ func (s *Server) openaiChat(w http.ResponseWriter, r *http.Request) {
 	// Rebuild a protocol-neutral evidence ledger from the restored transcript,
 	// including the original assistant function call before its tool result.
 	activeLedger := buildAgentLedger(activeMessages(body.Messages))
-	if err := activeLedger.CanContinue(maxToolRounds()); err != nil {
-		errorType := "tool_round_limit"
-		if activeLedger.RepeatedFailure {
-			errorType = "tool_loop_detected"
-		}
+	if len(activeLedger.Pending) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "invalid_request_error", "message": "pending tool results must be returned before another turn"}})
+		return
+	}
+	if activeLedger.RepeatedFailure && activeLedger.ToolRounds >= maxToolRounds() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": errorType, "message": err.Error(), "completed_calls": len(activeLedger.Completed)}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "tool_loop_detected", "message": "repeated tool failure detected", "completed_calls": len(activeLedger.Completed)}})
 		return
 	}
 	// Preserve role boundaries while enforcing a real global input budget. A
@@ -1696,7 +1698,7 @@ func (s *Server) openaiChat(w http.ResponseWriter, r *http.Request) {
 	// emitting a structured call event, so skipping the router lost tool calls
 	// entirely. The router runs first; when it selects no tool the streamed
 	// answer below forwards upstream text deltas immediately.
-	if body.Stream && len(toolMaps) > 0 && fmt.Sprint(body.ToolChoice) != "none" {
+	if body.Stream && len(toolMaps) > 0 && fmt.Sprint(body.ToolChoice) != "none" && activeLedger.ToolRounds < maxToolRounds() {
 		// Keep one absolute budget for the whole routing phase, but derive every
 		// individual call from the current account lease. A failover cancels the
 		// old lease and replaces ctx; reusing a child of the old ctx made the next
@@ -2067,7 +2069,7 @@ func (s *Server) openaiChat(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ask the upstream model to select and validate the next tool. The gateway
 	// remains tool-agnostic; it only validates and serializes the decision.
-	if len(toolMaps) > 0 && fmt.Sprint(body.ToolChoice) != "none" {
+	if len(toolMaps) > 0 && fmt.Sprint(body.ToolChoice) != "none" && activeLedger.ToolRounds < maxToolRounds() {
 		routerDeadline := time.Now().Add(toolRouterPhaseTimeout)
 		chatRouter := func(request chathub.Request) (chathub.Result, error) {
 			routerCtx, stopRouter := context.WithDeadline(ctx, routerDeadline)
